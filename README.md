@@ -1,174 +1,96 @@
 # Leadping Consent SDK
 
-Capture a form session, record the disclosure and consent interaction, and attach the capture reference to a lead submitted through your backend.
+The browser SDK for Leadping consent capture. It records a visitor's form interaction and sends the recording directly to Leadping.
 
-The SDK provides browser recording and a separate evidence verification/replay API. Session creation, lead acceptance, and evidence export are handled by Leadping services. The hosted evidence-viewer website lives in the main Leadping repository.
+## Integration status
 
-## How it works
+The recording SDK is implemented. The complete copy-and-paste customer integration is not yet implemented:
 
-1. Your backend requests a capture session from Leadping using its source API key and an approved form configuration.
-2. Your page displays the session's exact disclosure and starts `ConsentCapture` with an unchecked consent checkbox.
-3. The SDK records document activity and uploads batches using the session's short-lived upload token.
-4. On form submission, await `capture.finish(recipient)` to upload the remaining recording and submission assertion.
-5. Send the returned `consentCapture` reference and the same recipient data to your backend, which submits the lead to Leadping.
+- Capture uploads go directly to Leadping using a short-lived session token.
+- The current session-creation and lead-intake endpoints require a source API key intended for server-side use.
+- The SDK currently expects an existing session; it does not bootstrap one from a public form identifier or submit a lead itself.
 
-`finish()` completes the browser capture; it does not create a lead or establish that the lead is approved for contact.
+Leadping needs to provide browser-safe session creation and lead submission before this can be offered as a standalone customer embed. **Do not put a source API key in the page to work around this.**
 
-## Get the SDK
+The examples below document the current recording API for Leadping integration work. They are not a finished customer installation guide.
 
-### Browser module through jsDelivr
+## Load the SDK
 
-For a public repository with the built files committed to `main`:
+Use the browser module directly; no npm installation or build tool is required:
 
-```html
-<script type="module">
-  import { ConsentCapture } from
-    'https://cdn.jsdelivr.net/gh/leadpingai/leadping-consent-typescript@main/dist/browser/leadping-consent.min.js';
-
-  // Initialize ConsentCapture after obtaining a session from your backend.
-</script>
+```js
+import { ConsentCapture } from
+  'https://cdn.jsdelivr.net/gh/leadpingai/leadping-consent-typescript@main/dist/browser/leadping-consent.min.js';
 ```
 
-The browser bundle includes its dependencies. It is an ES module: use `import` or a module script, rather than expecting a global variable from a regular script tag.
+Use this import inside a `<script type="module">` or another JavaScript module. The repository must be public and the referenced commit must contain `dist`. For production, replace `@main` with a version tag or commit SHA containing the built files.
 
-For a production integration, replace `main` with a commit SHA or version tag that contains the built `dist` files. This pins the code your page loads. Updating `main` does not guarantee an immediate CDN cache refresh.
+## Current recording API
 
-### TypeScript application
+Once the Leadping integration has supplied a `CaptureSession`, initialize the recorder with the form elements:
 
-The package name is `@leadping/consent`. This repository currently produces an npm-compatible tarball; its workflow does **not** publish the package to the npm registry.
+```js
+// session is supplied by Leadping; it contains a short-lived upload token.
+const form = document.querySelector('#lead-form');
+const disclosure = document.querySelector('#consent-disclosure');
+const checkbox = document.querySelector('#consent-checkbox');
 
-Download the `.tgz` asset from a published GitHub release and install it locally, for example for version `0.1.0`:
+// Both elements must be inside form. The checkbox must start unchecked.
+disclosure.textContent = session.form.disclosure;
+
+const capture = new ConsentCapture({
+  apiUrl: 'https://consent.leadping.ai',
+  session,
+  form,
+  disclosure,
+  checkbox,
+  onError: error => {
+    // Disable submission and show a recording failure in the form.
+    console.error('Consent capture stopped:', error);
+  },
+});
+```
+
+Before completing submission, wait for the recording to finish:
+
+```js
+const consentCapture = await capture.finish({
+  email: 'visitor@example.com',
+  phone: '+15555550123',
+});
+
+// The Leadping integration must associate this reference with the lead.
+// finish() returns { sessionId, uploadToken }; it does not create the lead.
+capture.dispose();
+```
+
+Only dispose after uploads finish, or when abandoning the form. In a component framework, dispose when the component unmounts. Handle rejected promises from `finish()` and constructor errors in addition to `onError`.
+
+### What the page must provide
+
+- A form containing the disclosure element and consent checkbox.
+- An initially unchecked checkbox, with no `checked` HTML attribute.
+- The exact disclosure returned in the session, without edits.
+- An origin matching the session's approved origin.
+
+The recorder captures the **whole document, including unmasked input values**. Use it on the page intended for consent capture. Only one recorder can run per document.
+
+## TypeScript applications
+
+The package is not published to npm. For internal integration, download a `.tgz` from a published GitHub release or build one with `npm pack` after running `npm ci` and `npm run build`.
 
 ```sh
 npm install ./leadping-consent-0.1.0.tgz
 ```
 
-Then import the SDK and its types:
-
 ```ts
 import { ConsentCapture, type CaptureSession } from '@leadping/consent';
 ```
 
-You can also build and package a local checkout with `npm ci`, `npm run build`, and `npm pack`.
+## Reference
 
-## Capture a form
-
-The following example uses two routes implemented by **your application**:
-
-| Route | Responsibility |
-| --- | --- |
-| `POST /api/consent-session` | Request a session from Leadping on the server and return the `CaptureSession` JSON. |
-| `POST /api/lead` | Accept the recipient and capture reference, then forward them through the normal Leadping lead-intake flow. |
-
-These are example application routes, not routes provided by this SDK. Keep the Leadping source API key on your server.
-
-### Form markup
-
-Keep the form disabled until session setup succeeds. The disclosure is populated from the approved session before recording starts.
-
-```html
-<form id="lead-form">
-  <fieldset id="lead-fields" disabled>
-    <label>
-      Email
-      <input type="email" name="email" required>
-    </label>
-    <label>
-      Phone
-      <input type="tel" name="phone">
-    </label>
-    <label>
-      <input id="consent-checkbox" type="checkbox" required>
-      <span id="consent-disclosure"></span>
-    </label>
-    <button id="submit-lead" type="submit">Submit</button>
-  </fieldset>
-  <p id="form-status" role="status" aria-live="polite"></p>
-</form>
-```
-
-### Initialize and submit
-
-Run this code after the form exists, such as from a module script. With the CDN bundle, replace the package import with the jsDelivr import above and remove the TypeScript annotations.
-
-```ts
-import { ConsentCapture, type CaptureSession } from '@leadping/consent';
-
-const form = document.querySelector<HTMLFormElement>('#lead-form')!;
-const fields = document.querySelector<HTMLFieldSetElement>('#lead-fields')!;
-const disclosure = document.querySelector<HTMLElement>('#consent-disclosure')!;
-const checkbox = document.querySelector<HTMLInputElement>('#consent-checkbox')!;
-const submit = document.querySelector<HTMLButtonElement>('#submit-lead')!;
-const status = document.querySelector<HTMLElement>('#form-status')!;
-
-async function initialize(): Promise<void> {
-  const response = await fetch('/api/consent-session', { method: 'POST' });
-  if (!response.ok) throw new Error('Unable to start consent capture.');
-  const session: CaptureSession = await response.json();
-
-  disclosure.textContent = session.form.disclosure;
-
-  const capture = new ConsentCapture({
-    apiUrl: 'https://consent.leadping.ai',
-    session,
-    form,
-    disclosure,
-    checkbox,
-    onError: () => {
-      submit.disabled = true;
-      status.textContent = 'Recording stopped. Please start a new form session.';
-    },
-  });
-
-  fields.disabled = false;
-  let submitting = false;
-
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    if (submitting || submit.disabled) return;
-    submitting = true;
-    submit.disabled = true;
-
-    const data = new FormData(form);
-    const recipient = {
-      email: String(data.get('email') ?? ''),
-      phone: String(data.get('phone') ?? ''),
-    };
-
-    try {
-      const consentCapture = await capture.finish(recipient);
-      const result = await fetch('/api/lead', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...recipient, consentCapture }),
-      });
-      if (!result.ok) throw new Error('Lead submission was not confirmed.');
-      status.textContent = 'Submitted. Thank you.';
-    } catch {
-      // A lost response does not prove that your backend rejected the lead.
-      // Resolve uncertain outcomes through your application's retry/status flow.
-      status.textContent = 'Submission could not be confirmed. Please contact support.';
-    } finally {
-      capture.dispose();
-    }
-  });
-}
-
-void initialize().catch(() => {
-  status.textContent = 'Unable to start the form. Please reload and try again.';
-});
-```
-
-In a component-based application, also call `capture.dispose()` when the component unmounts. Do not dispose while `finish()` is still uploading.
-
-### Backend responsibilities
-
-- Authenticate server-to-server to the Leadping API's `POST /consent/sessions` endpoint. Choose the approved form ID and URL on the server; do not trust arbitrary browser-supplied form definitions.
-- Return the capture session to the requesting page. Its `form.origin` must exactly match the page's `location.origin`, including the scheme and any port.
-- Forward the returned `consentCapture` object with the recipient and other required intake fields to `POST /leads/intake` on the Leadping API.
-- When retrying an uncertain lead submission, reuse the same capture reference and recipient data. Do not start a new recording simply because the lead response was lost.
-
-The SDK's `apiUrl` points to the **capture upload service**. Session creation and lead intake go through the Leadping API via your backend.
+<details>
+<summary><strong>API reference, recording behavior, and evidence replay</strong></summary>
 
 ## API reference
 
@@ -179,7 +101,7 @@ Recording begins immediately when construction succeeds.
 | Option | Type | Description |
 | --- | --- | --- |
 | `apiUrl` | `string` | HTTPS capture-service origin, without credentials, a query string, or a fragment. |
-| `session` | `CaptureSession` | Session returned by your backend. |
+| `session` | `CaptureSession` | Session supplied by the Leadping integration. |
 | `form` | `HTMLFormElement` | Form containing the disclosure and checkbox. |
 | `disclosure` | `HTMLElement` | Element whose `textContent` exactly matches `session.form.disclosure`. |
 | `checkbox` | `HTMLInputElement` | Consent checkbox; both `checked` and `defaultChecked` must initially be false. |
@@ -229,6 +151,11 @@ The equivalent browser module is `dist/browser/leadping-consent-viewer.min.js`. 
 
 `mountEvidence()` verifies before rendering and provides playback controls for complete recordings. Incomplete recordings display their status without starting replay. Use it on a dedicated page with a restrictive Content Security Policy; the hosted viewer implementation is maintained in the main Leadping repository. Captured page scripts are not enabled during replay, and unavailable external resources can affect visual fidelity.
 
+</details>
+
+<details>
+<summary><strong>Building and publishing the SDK</strong></summary>
+
 ## Build and distribution
 
 Use Node.js 24, matching CI:
@@ -260,12 +187,14 @@ The build also emits `dist/browser/index.js` and `dist/browser/viewer.js` for th
 
 To make a versioned jsDelivr URL available, wait for the `dist` commit, pull it, and tag that commit. The release workflow creates downloadable assets but does not insert files into an existing tag. The package version must match the tag, for example `0.1.0` and `v0.1.0`.
 
+</details>
+
 ## Troubleshooting
 
 | Problem | Check |
 | --- | --- |
 | Form rejected during initialization | Exact origin and disclosure text, unchecked checkbox defaults, and both elements inside the form. |
-| Invalid or expired session | Obtain a fresh session from your backend; check the expiry and client clock. |
+| Invalid or expired session | Obtain a fresh session from Leadping; check the expiry and client clock. |
 | Only one recorder may run | Dispose the previous instance before starting another. |
 | Capture upload rejected or never acknowledged | Capture-service URL, session token/expiry, allowed origin, network connectivity, and service response. |
 | jsDelivr returns 404 | The repository is public and the requested branch, tag, or commit actually contains the file under `dist/`. |
