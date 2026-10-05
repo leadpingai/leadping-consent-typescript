@@ -1,0 +1,19 @@
+{
+  "name": "@leadping/consent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist"],
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./viewer": { "types": "./dist/viewer.d.ts", "import": "./dist/viewer.js" }
+  },
+  "scripts": {
+    "build": "tsc && node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "benchmark": "node test/benchmark.mjs"
+  },
+  "dependencies": { "rrweb": "2.1.7", "@rrweb/types": "2.1.7" },
+  "devDependencies": { "esbuild": "0.28.2", "typescript": "7.0.2" }
+}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; font-src data:; frame-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Leadping Consent</title>
+  <link rel="stylesheet" href="viewer.css">
+  <link rel="stylesheet" href="../sdk/replay.css">
+</head>
+<body>
+  <main>
+    <h1>Leadping Consent</h1>
+    <p>Open a consent evidence export to verify its integrity and replay the form session. Files stay in your browser.</p>
+    <label>Evidence export <input id="evidence-file" type="file" accept="application/json,.json"></label>
+    <p id="error" role="alert"></p>
+    <section id="evidence" aria-label="Consent evidence"></section>
+  </main>
+  <script type="module" src="viewer-page.js"></script>
+</body>
+</html>
