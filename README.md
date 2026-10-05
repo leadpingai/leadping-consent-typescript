@@ -1,71 +1,63 @@
 # Leadping Consent SDK
 
-Add consent capture to your form with a regular script tag. The script obtains its session, uploads the recording, and submits the lead directly to Leadping. No customer backend, API key, npm install, or module script is required.
+Record consent on your website and receive a certificate ID. The consent service stores the evidence; the consent portal shows the certificate and replay. This SDK does not create leads or call the main Leadping API.
 
-## Add it to your page
+## Add one script to your form
 
-Leadping must first register your public form ID and website origin. Replace `YOUR_PUBLIC_FORM_ID` below with that ID.
+Register your website's allowed origins with the consent service, then replace `YOUR_PUBLIC_DOMAIN_ID` below. This identifier is public, not an API key.
 
 ```html
 <form id="lead-form">
   <label>Email <input name="email" type="email" required></label>
-  <label>Phone <input name="phone" type="tel"></label>
-  <label>
-    <input type="checkbox" data-leadping-consent required>
-    <span data-leadping-disclosure></span>
+  <label><input type="checkbox" data-leadping-consent required>
+    <span data-leadping-disclosure>I agree to the terms displayed on this page.</span>
   </label>
   <button type="submit">Submit</button>
 </form>
 <script
   src="https://cdn.jsdelivr.net/gh/leadpingai/leadping-consent-typescript@main/dist/leadping-consent.min.js"
-  data-form-id="YOUR_PUBLIC_FORM_ID"
+  data-domain-id="YOUR_PUBLIC_DOMAIN_ID"
   defer>
 </script>
 ```
 
-The script fills in the approved disclosure, records the page, and handles form submission. Use it as the form's submission handler; remove competing handlers that also submit the same lead. Keep the checkbox unchecked initially. The recorder preserves document content and unmasked input values across the whole page.
+Use your actual disclosure text. The script records that text; it does not supply or approve it. It captures the current page URL automatically, including its query string and fragment. The recorder captures the whole document with unmasked input values.
 
-Use input names `firstName`, `lastName`, `email`, and `phone` for the recipient fields you collect. Only these fields and the capture reference are submitted by the embed. Arbitrary custom intake fields are not supported by this embed yet.
+On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://consent-portal.leadping.ai/certificates/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
 
-For production, replace `@main` with a tag or commit SHA containing the built `dist` files. The repository must be public for jsDelivr.
+For production replace `@main` with a version tag or commit that includes `dist`. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
 
-### Options
+## Options and events
 
-| Script attribute | Default | Purpose |
-| --- | --- | --- |
-| `data-form-id` | Required | Public form ID registered by Leadping. This is not an API key. |
-| `data-form` | `#lead-form` | CSS selector for your form. |
-| `data-api-url` | `https://consent.leadping.ai` | Leadping capture-service origin; useful for configured test environments. |
+| Attribute | Purpose |
+| --- | --- |
+| `data-domain-id` | Required public website registration ID. |
+| `data-form` | Form selector; defaults to `#lead-form`. |
+| `data-api-url` | Consent API origin; defaults to `https://consent-api.leadping.ai`. The SDK appends `/api`. |
+| `data-portal-url` | Certificate portal origin; defaults to `https://consent-portal.leadping.ai`. Using the local API automatically selects the local portal. |
 
-Only one recorder can run per document. The script displays loading, submission, and failure messages inside the form. It emits `leadping:ready`, `leadping:success`, and `leadping:error` events on the form for optional custom UI. It does not automatically retry uncertain lead submissions.
+Recipient inputs use `firstName`, `lastName`, `email`, and `phone`. Supply at least email or phone. The checkbox must start unchecked and the disclosure must stay unchanged during capture. Only one recorder runs per document.
 
-### Existing applications
-
-The classic script exposes `window.LeadpingConsent.ConsentCapture` and `window.LeadpingConsent.attach(scriptElement)`. If the script has `data-form-id`, attachment is automatic; do not attach it a second time.
-
-The existing ES module remains available at `dist/browser/leadping-consent.min.js`. Import `ConsentCapture` from it when you need manual lifecycle control. The classic embed is at **`dist/leadping-consent.min.js`**; these two files serve different integration styles.
-
-## Leadping deployment setup
-
-The embed requires the accompanying consent Worker update. Publishing the JavaScript alone does not deploy these routes:
-
-- `POST /consent/forms/{formId}/sessions`
-- `POST /consent/forms/{formId}/leads`
-
-Leadping operators configure approved forms in `CONSENT_FORMS_JSON` and store `CONSENT_EMBED_SOURCES_JSON` as a **Worker secret**. Its value maps each approved source ID to its Leadping API origin and source API key:
-
-```json
-{
-  "SOURCE_ID": {
-    "apiUrl": "https://api.leadping.ai",
-    "sourceKey": "SERVER_SIDE_SOURCE_API_KEY"
-  }
-}
+```js
+document.querySelector('#lead-form').addEventListener('leadping:success', event => {
+  const { certificateId, certificateUrl } = event.detail;
+  console.log(certificateId, certificateUrl);
+});
 ```
 
-Use the API origin appropriate to the environment. Never place this secret in public form configuration or customer HTML. The Worker checks the registered origin, rate-limits requests, and forwards only supported fields. The existing Leadping intake service remains responsible for validating the source and claiming the consent evidence for the recipient.
+`leadping:ready` signals that recording has started; `leadping:error` reports a failure. `window.LeadpingConsent` exposes `ConsentCapture` and `attach(scriptElement)` for advanced use. Do not attach twice when `data-domain-id` already starts the embed automatically.
 
-Deploy and configure the Worker before distributing the embed. Verify session creation, recording uploads, and an accepted lead against the deployed environment before treating an installation as complete.
+## Consent service setup
+
+Leadping operates the API and portal; you do not deploy a backend. Ask Leadping to register your domain ID and exact website origins. For Leadping operators, `CONSENT_DOMAINS_JSON` has this format:
+
+```json
+[{ "id": "demo-domain", "origins": ["https://example.com", "https://www.example.com"] }]
+```
+
+The browser uses `POST /api/consent/domains/{id}/sessions`, uploads recording batches, then calls `POST /api/consent/certificates` with the session capability. No main Leadping source credentials are used.
+
+Certificate URLs are shareable access links: anyone with the ID can view the certificate and recording. Treat those links as sensitive when recordings contain personal information.
 
 ## Reference
 
