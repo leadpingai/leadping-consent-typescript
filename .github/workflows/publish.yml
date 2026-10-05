@@ -41,6 +41,7 @@ jobs:
         run: |
           mkdir -p release/site/sdk
           cp -R dist/browser/. release/site/sdk/
+          cp dist/leadping-consent.min.js* release/site/
           tar -czf release/leadping-consent-browser.tar.gz -C release/site .
           npm pack --pack-destination release
           cp dist/browser/* release/

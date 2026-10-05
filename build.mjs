@@ -15,3 +15,8 @@ await build({
   legalComments: 'external',
 });
 await copyFile('node_modules/rrweb/dist/style.css', 'dist/browser/replay.css');
+await build({
+  entryPoints: ['src/embed.ts'], outfile: 'dist/leadping-consent.min.js',
+  bundle: true, minify: true, sourcemap: true, format: 'iife', globalName: 'LeadpingConsent',
+  target: 'es2022', legalComments: 'external',
+});
