@@ -23,7 +23,7 @@ Register your website's allowed origins with the consent service, then replace `
 
 Use your actual disclosure text. The script records that text; it does not supply or approve it. It captures the current page URL automatically, including its query string and fragment. The recorder captures the whole document with unmasked input values.
 
-On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://consent-portal.leadping.ai/certificates/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
+On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://certificate.leadping.ai/certificates/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
 
 For production replace `@main` with a version tag or commit that includes `dist`. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
 
@@ -33,8 +33,8 @@ For production replace `@main` with a version tag or commit that includes `dist`
 | --- | --- |
 | `data-domain-id` | Required public website registration ID. |
 | `data-form` | Form selector; defaults to `#lead-form`. |
-| `data-api-url` | Consent API origin; defaults to `https://consent-api.leadping.ai`. The SDK appends `/api`. |
-| `data-portal-url` | Certificate portal origin; defaults to `https://consent-portal.leadping.ai`. Using the local API automatically selects the local portal. |
+| `data-api-url` | Consent API origin; defaults to `https://consent.leadping.ai`. The SDK appends `/api`. |
+| `data-portal-url` | Certificate portal origin; defaults to `https://certificate.leadping.ai`. Using the local API automatically selects the local portal. |
 
 Recipient inputs use `firstName`, `lastName`, `email`, and `phone`. Supply at least email or phone. The checkbox must start unchecked and the disclosure must stay unchanged during capture. Only one recorder runs per document.
 

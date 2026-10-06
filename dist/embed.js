@@ -24,11 +24,11 @@ export async function attach(script) {
         status.textContent = 'Unable to complete consent capture. Please reload to start again.';
         form.dispatchEvent(new CustomEvent('leadping:error', { detail: error }));
     };
-    const origin = new URL(script.dataset.apiUrl ?? 'https://consent-api.leadping.ai');
+    const origin = new URL(script.dataset.apiUrl ?? 'https://consent.leadping.ai');
     if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash || origin.pathname !== '/')
         throw new Error('Leadping requires an HTTPS API origin.');
-    const portal = new URL(script.dataset.portalUrl ?? (origin.hostname === 'consent-api-local.leadping.ai'
-        ? 'https://consent-portal-local.leadping.ai' : 'https://consent-portal.leadping.ai'));
+    const portal = new URL(script.dataset.portalUrl ?? (origin.hostname === 'consent-local.leadping.ai'
+        ? 'https://certificate-local.leadping.ai' : 'https://certificate.leadping.ai'));
     if (portal.protocol !== 'https:' || portal.username || portal.password || portal.search || portal.hash || portal.pathname !== '/')
         throw new Error('Leadping requires an HTTPS portal origin.');
     const endpoint = `${origin.origin}/api/consent`;
