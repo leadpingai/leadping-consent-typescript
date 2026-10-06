@@ -1,7 +1,15 @@
 {
   "name": "@leadping/consent",
   "version": "0.1.0",
-  "private": true,
+  "description": "Leadping consent capture SDK for browser forms.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leadpingai/leadping-consent-typescript.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: consent-sdk-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   build:
@@ -53,43 +53,37 @@ jobs:
           path: release/*
           if-no-files-found: error
 
-  publish-dist:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  publish-npm:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
         with:
-          ref: main
-      - name: Remove previous distribution
-        run: rm -rf dist
+          node-version: '24'
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@^11.5.1
       - uses: actions/download-artifact@v4
         with:
-          name: consent-sdk-dist
-          path: dist
-      - name: Commit distribution for jsDelivr
-        env:
-          SOURCE_SHA: ${{ github.sha }}
+          name: leadping-consent-distribution
+          path: release
+      - name: Publish tested package to npm
+        shell: bash
         run: |
-          if [ "$(git rev-parse HEAD)" != "$SOURCE_SHA" ]; then
-            echo 'Main has advanced; its newer workflow will publish dist.'
-            exit 0
-          fi
-          git config user.name leadpingai-bot
-          git config user.email support@leadping.ai
-          git add -A dist
-          if git diff --cached --quiet; then
-            echo 'Distribution is already current.'
-            exit 0
-          fi
-          git commit -m "Publish consent SDK distribution [skip ci]"
-          git push origin HEAD:main
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          dist_tag=latest
+          if [[ "$version" == *-* ]]; then dist_tag=next; fi
+          npm publish "release/leadping-consent-${version}.tgz" --access public --tag "$dist_tag" --registry https://registry.npmjs.org
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, publish-npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write

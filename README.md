@@ -15,7 +15,7 @@ Register your website's allowed origins with the consent service, then replace `
   <button type="submit">Submit</button>
 </form>
 <script
-  src="https://cdn.jsdelivr.net/gh/leadpingai/leadping-consent-typescript@main/dist/leadping-consent.min.js"
+  src="https://cdn.jsdelivr.net/npm/@leadping/consent@0.1.0/dist/leadping-consent.min.js"
   data-domain-id="YOUR_PUBLIC_DOMAIN_ID"
   defer>
 </script>
@@ -25,7 +25,7 @@ Use your actual disclosure text. The script records that text; it does not suppl
 
 On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://certificate.leadping.ai/certificates/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
 
-For production replace `@main` with a version tag or commit that includes `dist`. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
+Pin the URL to a published npm version. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
 
 ## Options and events
 
@@ -116,7 +116,7 @@ npm run build
 npm test
 ```
 
-`npm run benchmark` runs the buffer benchmark. Edit `src/`, then regenerate `dist/`; generated output is committed so jsDelivr can serve it.
+`npm run benchmark` runs the buffer benchmark. Edit `src/`, then regenerate `dist/`; generated output is ignored by Git and included in the npm package so jsDelivr can serve it.
 
 | Output | Purpose |
 | --- | --- |
@@ -130,10 +130,10 @@ The build also emits `dist/browser/index.js` for the consent service's existing 
 ### Publishing workflow
 
 - Pull requests build and test the SDK and upload artifacts.
-- Pushes to `main` additionally commit updated `dist/` files as `leadpingai-bot`. The workflow needs permission to push to `main`, including any branch-rule requirements.
-- A `v*` tag matching `package.json` publishes a GitHub Release containing browser files, source maps, license notices, checksums, a browser archive, and the typed npm tarball.
+- Pushes to `main` build and test the SDK and upload artifacts without committing generated files.
+- A `v*` tag matching `package.json` publishes the tested npm tarball as `@leadping/consent` using trusted publishing, then publishes a GitHub Release containing browser files, source maps, license notices, checksums, a browser archive, and the typed npm tarball. Prerelease versions use the npm `next` tag; stable versions use `latest`.
 
-To make a versioned jsDelivr URL available, wait for the `dist` commit, pull it, and tag that commit. The release workflow creates downloadable assets but does not insert files into an existing tag. The package version must match the tag, for example `0.1.0` and `v0.1.0`.
+To make a versioned jsDelivr URL available, push a release tag and wait for npm publishing to succeed. The package version must match the tag, for example `0.1.0` and `v0.1.0`. npm must trust `leadpingai/leadping-consent-typescript` and the workflow filename `publish.yml`. jsDelivr serves the files from the published npm package; `dist/` does not need to exist in Git.
 
 </details>
 
@@ -145,5 +145,5 @@ To make a versioned jsDelivr URL available, wait for the `dist` commit, pull it,
 | Invalid or expired session | Obtain a fresh session from Leadping; check the expiry and client clock. |
 | Only one recorder may run | Dispose the previous instance before starting another. |
 | Capture upload rejected or never acknowledged | Capture-service URL, session token/expiry, allowed origin, network connectivity, and service response. |
-| jsDelivr returns 404 | The repository is public and the requested branch, tag, or commit actually contains the file under `dist/`. |
-| `dist` is not updated after pushing | Check the `build` and `publish-dist` jobs, token write permissions, and branch protection. |
+| jsDelivr returns 404 | The requested npm version has been published and contains the file under `dist/`. |
+| CDN files are not updated after pushing | Only release tags publish npm versions. Check the `build` and `publish-npm` jobs, then update your URL to the new version. |
