@@ -5,6 +5,18 @@ import { CaptureTransport } from './transport.js';
 export class ConsentCapture {
     options;
     static active;
+    browser = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        language: navigator.language,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+        colorDepth: screen.colorDepth,
+        pixelRatio: window.devicePixelRatio,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+        maxTouchPoints: navigator.maxTouchPoints,
+    };
     buffer = new EventBuffer();
     transport;
     pending = [];
@@ -49,7 +61,7 @@ export class ConsentCapture {
                 recordCanvas: false,
                 recordCrossOriginIframes: false,
                 collectFonts: false,
-                sampling: { mousemove: 100, mouseInteraction: true, scroll: 150, input: 'last', media: 1000 },
+                sampling: { mousemove: 100, mouseInteraction: true, scroll: 150, input: 'all', media: 1000 },
                 errorHandler: () => { this.fail(new Error('The page could not be fully recorded.')); return true; },
             });
             if (!this.stopRecording || this.failure)
@@ -94,7 +106,7 @@ export class ConsentCapture {
         await this.flush();
         await this.transport.put('/submission', JSON.stringify({
             lastBatchNumber: this.buffer.lastBatchNumber, lastEventNumber: this.buffer.lastEventNumber,
-            accepted, observedDisclosure, recipient,
+            accepted, observedDisclosure, recipient, browser: this.browser,
         }));
         return { sessionId: this.options.session.sessionId, uploadToken: this.options.session.uploadToken };
     }

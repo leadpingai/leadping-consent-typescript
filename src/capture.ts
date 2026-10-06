@@ -7,6 +7,18 @@ import type { CaptureOptions, CaptureReference, Recipient, SealedBatch } from '.
 /** One form recording per document, matching rrweb's document-level recorder. */
 export class ConsentCapture {
   private static active?: ConsentCapture;
+  private readonly browser = {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    language: navigator.language,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    colorDepth: screen.colorDepth,
+    pixelRatio: window.devicePixelRatio,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    maxTouchPoints: navigator.maxTouchPoints,
+  };
   private readonly buffer = new EventBuffer();
   private readonly transport: CaptureTransport;
   private readonly pending: (SealedBatch | undefined)[] = [];
@@ -91,7 +103,7 @@ export class ConsentCapture {
     await this.flush();
     await this.transport.put('/submission', JSON.stringify({
       lastBatchNumber: this.buffer.lastBatchNumber, lastEventNumber: this.buffer.lastEventNumber,
-      accepted, observedDisclosure, recipient,
+      accepted, observedDisclosure, recipient, browser: this.browser,
     }));
     return { sessionId: this.options.session.sessionId, uploadToken: this.options.session.uploadToken };
   }

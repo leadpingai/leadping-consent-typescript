@@ -1,11 +1,11 @@
 export interface ConsentForm {
     id: string;
-    sourceId: string;
+    sourceId?: string;
     origin: string;
     disclosure: string;
-    sellers: string[];
-    channels: string[];
-    approvedForContact: boolean;
+    sellers?: string[];
+    channels?: string[];
+    approvedForContact?: boolean;
 }
 /** Obtain from your backend. Never put a Leadping source API key in the browser. */
 export interface CaptureSession {

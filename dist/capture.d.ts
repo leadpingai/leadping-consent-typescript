@@ -3,6 +3,7 @@ import type { CaptureOptions, CaptureReference, Recipient } from './types.js';
 export declare class ConsentCapture {
     private readonly options;
     private static active?;
+    private readonly browser;
     private readonly buffer;
     private readonly transport;
     private readonly pending;
