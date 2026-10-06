@@ -49,7 +49,7 @@ export class ConsentCapture {
                 recordCanvas: false,
                 recordCrossOriginIframes: false,
                 collectFonts: false,
-                sampling: { mousemove: 100, mouseInteraction: true, scroll: 150, input: 'last', media: 1000 },
+                sampling: { mousemove: 100, mouseInteraction: true, scroll: 150, input: 'all', media: 1000 },
                 errorHandler: () => { this.fail(new Error('The page could not be fully recorded.')); return true; },
             });
             if (!this.stopRecording || this.failure)
