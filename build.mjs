@@ -1,20 +1,19 @@
 import { build } from 'esbuild';
-import { copyFile, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 await rm('dist/browser', { recursive: true, force: true });
-// Remove the former hosted viewer page from existing build directories.
-await rm('dist/viewer', { recursive: true, force: true });
+// Remove obsolete replay exports when rebuilding an existing checkout.
+await Promise.all(['dist/viewer.js', 'dist/viewer.d.ts'].map(path => rm(path, { force: true })));
 await build({
-  entryPoints: ['src/index.ts', 'src/viewer.ts'], outdir: 'dist/browser',
+  entryPoints: ['src/index.ts'], outdir: 'dist/browser',
   bundle: true, minify: true, sourcemap: true, format: 'esm', target: 'es2022',
   legalComments: 'external',
 });
 await build({
-  entryPoints: { 'leadping-consent': 'src/index.ts', 'leadping-consent-viewer': 'src/viewer.ts' },
+  entryPoints: { 'leadping-consent': 'src/index.ts' },
   outdir: 'dist/browser', outExtension: { '.js': '.min.js' },
   bundle: true, minify: true, sourcemap: true, format: 'esm', target: 'es2022',
   legalComments: 'external',
 });
-await copyFile('node_modules/rrweb/dist/style.css', 'dist/browser/replay.css');
 await build({
   entryPoints: ['src/embed.ts'], outfile: 'dist/leadping-consent.min.js',
   bundle: true, minify: true, sourcemap: true, format: 'iife', globalName: 'LeadpingConsent',

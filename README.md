@@ -101,28 +101,6 @@ Pending data is flushed every three seconds, on a page visibility change to hidd
 
 Uploads use bounded retries for transient failures. Buffer, backlog, and session limits cause capture to fail explicitly rather than silently discard events. The SDK does not persist an offline recording queue across reloads.
 
-## Verify and replay evidence
-
-Replay is a separate import so capture pages do not need to load the replay bundle:
-
-```ts
-import { verifyEvidence, mountEvidence } from '@leadping/consent/viewer';
-
-// bundle is the parsed JSON from an authorized Leadping evidence export.
-const verified = await verifyEvidence(bundle);
-console.log(verified.complete, verified.disclosure, verified.keyFingerprint);
-
-// Use a dedicated, CSP-restricted viewer page for mounting evidence.
-const disposeReplay = await mountEvidence(document.querySelector('#replay')!, bundle);
-// Call disposeReplay() when closing or replacing the replay.
-```
-
-The equivalent browser module is `dist/browser/leadping-consent-viewer.min.js`. Replay also needs `dist/browser/replay.css`.
-
-`verifyEvidence()` checks the payload digest, signature against the included public key, batch hashes, event sequence, and manifest completeness. Verify the returned public-key fingerprint against a trusted value independently: a matching signature alone does not establish who supplied the included key.
-
-`mountEvidence()` verifies before rendering and provides playback controls for complete recordings. Incomplete recordings display their status without starting replay. Use it on a dedicated page with a restrictive Content Security Policy; the hosted viewer implementation is maintained in the main Leadping repository. Captured page scripts are not enabled during replay, and unavailable external resources can affect visual fidelity.
-
 </details>
 
 <details>
@@ -143,19 +121,17 @@ npm test
 | Output | Purpose |
 | --- | --- |
 | `dist/browser/leadping-consent.min.js` | Bundled browser capture SDK. |
-| `dist/browser/leadping-consent-viewer.min.js` | Bundled evidence verification and replay API. |
-| `dist/browser/replay.css` | Replay styles. |
 | `dist/browser/*.map` | Browser source maps. |
 | `dist/browser/*.LEGAL.txt` | Dependency license notices. |
 | `dist/*.js` and `dist/*.d.ts` | ESM modules and TypeScript declarations for package consumers. |
 
-The build also emits `dist/browser/index.js` and `dist/browser/viewer.js` for the consent service's existing SDK paths. These are bundled and minified as well.
+The build also emits `dist/browser/index.js` for the consent service's existing SDK paths. This is bundled and minified as well.
 
 ### Publishing workflow
 
 - Pull requests build and test the SDK and upload artifacts.
 - Pushes to `main` additionally commit updated `dist/` files as `leadpingai-bot`. The workflow needs permission to push to `main`, including any branch-rule requirements.
-- A `v*` tag matching `package.json` publishes a GitHub Release containing browser files, source maps, CSS, license notices, checksums, a browser archive, and the typed npm tarball.
+- A `v*` tag matching `package.json` publishes a GitHub Release containing browser files, source maps, license notices, checksums, a browser archive, and the typed npm tarball.
 
 To make a versioned jsDelivr URL available, wait for the `dist` commit, pull it, and tag that commit. The release workflow creates downloadable assets but does not insert files into an existing tag. The package version must match the tag, for example `0.1.0` and `v0.1.0`.
 

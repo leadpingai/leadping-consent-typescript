@@ -2,12 +2,11 @@
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 const html = `<!doctype html><html><head><title>Leadping Consent browser verification</title></head><body>
-<link rel="stylesheet" href="/sdk/replay.css"><h1>Leadping Consent browser verification</h1><form id="form"><label>Email <input id="email" name="email"></label>
+<h1>Leadping Consent browser verification</h1><form id="form"><label>Email <input id="email" name="email"></label>
 <label><input id="agree" type="checkbox"><span id="disclosure">I agree.</span></label><button>Submit</button></form>
-<p id="status">Starting</p><section id="replay"></section><script type="module" src="/test.js"></script></body></html>`;
+<p id="status">Starting</p><script type="module" src="/test.js"></script></body></html>`;
 const script = `
 import { ConsentCapture } from '/sdk/index.js';
-import { mountEvidence } from '/sdk/viewer.js';
 const batches = [];
 const nativeFetch = window.fetch.bind(window);
 window.captureErrors = [];
@@ -44,8 +43,7 @@ form.addEventListener('submit', async e => {
     window.bundle = {receipt:{evidenceSha256:await hash(payload)}, evidence:{payload:b64(payload),signature:b64(signature),publicKey:b64(publicKey),signingKeyId:'test'}, batches:encoded.map(b64)};
     window.inputPreserved = JSON.stringify(batches).includes('private@example.com');
     await nativeFetch('/export', {method:'POST',body:JSON.stringify(window.bundle)});
-    await mountEvidence(document.querySelector('#replay'),window.bundle);
-    document.querySelector('#status').textContent = 'Captured and verified';
+    document.querySelector('#status').textContent = 'Captured and exported';
   } catch(error) { window.captureErrors.push(error.message); document.querySelector('#status').textContent = error.message; }
 });`;
 createServer(async (req, res) => {
@@ -54,10 +52,6 @@ createServer(async (req, res) => {
       const parts = []; for await (const part of req) parts.push(part);
       await writeFile(new URL('../../../../artifacts/consent-browser-fixture.json', import.meta.url), Buffer.concat(parts));
       return res.end();
-    }
-    if (/^\/viewer\/[a-z.-]+$/.test(req.url ?? '')) {
-      res.setHeader('Content-Type',req.url.endsWith('.html')?'text/html':req.url.endsWith('.css')?'text/css':'text/javascript');
-      return res.end(await readFile(new URL('../viewer/' + req.url.split('/').pop(), import.meta.url)));
     }
     if (req.url === '/') { res.setHeader('Content-Type','text/html'); return res.end(html); }
     if (req.url === '/test.js') { res.setHeader('Content-Type','text/javascript'); return res.end(script); }
