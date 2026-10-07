@@ -27,6 +27,8 @@ On submission the script finalizes recording, obtains a certificate, and display
 
 Pin the URL to a published npm version. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
 
+The package defaults to the regular browser script, including on jsDelivr and UNPKG. Applications that need the module API can explicitly import `ConsentCapture` from `@leadping/consent/esm`.
+
 ## Options and events
 
 | Attribute | Purpose |
@@ -120,10 +122,11 @@ npm test
 
 | Output | Purpose |
 | --- | --- |
+| `dist/leadping-consent.js` and `dist/leadping-consent.min.js` | Standalone scripts with automatic form attachment; the package and CDN defaults. |
 | `dist/browser/leadping-consent.min.js` | Bundled browser capture SDK. |
 | `dist/browser/*.map` | Browser source maps. |
 | `dist/browser/*.LEGAL.txt` | Dependency license notices. |
-| `dist/*.js` and `dist/*.d.ts` | ESM modules and TypeScript declarations for package consumers. |
+| `dist/esm/*.js` and `dist/esm/*.d.ts` | Optional ESM API and TypeScript declarations, available through `@leadping/consent/esm`. |
 
 The build also emits `dist/browser/index.js` for the consent service's existing SDK paths. This is bundled and minified as well.
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CaptureTransport } from '../dist/transport.js';
+import { CaptureTransport } from '../dist/esm/transport.js';
 
 test('transient failure retries identical bytes and waits for acknowledgment', async () => {
   const original = globalThis.fetch;

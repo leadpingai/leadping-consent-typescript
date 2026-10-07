@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"], "strict": true,
-    "declaration": true, "outDir": "dist", "rootDir": "src",
+    "declaration": true, "outDir": "dist/esm", "rootDir": "src",
     "skipLibCheck": true, "noUncheckedIndexedAccess": true
   },
   "include": ["src/**/*.ts"]

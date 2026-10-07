@@ -10,15 +10,20 @@
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
-  "type": "module",
-  "sideEffects": false,
+  "main": "./dist/leadping-consent.js",
+  "jsdelivr": "./dist/leadping-consent.min.js",
+  "unpkg": "./dist/leadping-consent.min.js",
+  "sideEffects": ["./dist/leadping-consent.js", "./dist/leadping-consent.min.js"],
   "files": [
-    "dist"
+    "dist/leadping-consent*.js*",
+    "dist/esm",
+    "dist/browser"
   ],
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+    ".": "./dist/leadping-consent.js",
+    "./esm": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js"
     }
   },
   "scripts": {

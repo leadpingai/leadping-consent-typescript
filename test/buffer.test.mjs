@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventBuffer, utf8Length } from '../dist/event-buffer.js';
+import { EventBuffer, utf8Length } from '../dist/esm/event-buffer.js';
 
 test('UTF-8 sizing matches encoder including surrogate edge cases', () => {
   for (const input of ['', 'abc', 'é', '🌍', '\ud800', '\udfff', '漢字', 'a🌍é漢\ud800'])

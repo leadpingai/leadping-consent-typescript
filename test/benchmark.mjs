@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { EventBuffer } from '../dist/event-buffer.js';
+import { EventBuffer } from '../dist/esm/event-buffer.js';
 const samples = [];
 let bytes = 0;
 for (let run = 0; run < 10; run++) {
