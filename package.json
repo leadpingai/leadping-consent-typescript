@@ -1,6 +1,6 @@
 {
   "name": "@leadping/consent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Leadping consent capture SDK for browser forms.",
   "repository": {
     "type": "git",
@@ -13,7 +13,10 @@
   "main": "./dist/leadping-consent.js",
   "jsdelivr": "./dist/leadping-consent.min.js",
   "unpkg": "./dist/leadping-consent.min.js",
-  "sideEffects": ["./dist/leadping-consent.js", "./dist/leadping-consent.min.js"],
+  "sideEffects": [
+    "./dist/leadping-consent.js",
+    "./dist/leadping-consent.min.js"
+  ],
   "files": [
     "dist/leadping-consent*.js*",
     "dist/esm",
