@@ -181,7 +181,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          npm publish "release/leadping-consent-${RELEASE_VERSION}.tgz" --access public --tag latest --registry https://registry.npmjs.org
+          npm publish "./release/leadping-consent-${RELEASE_VERSION}.tgz" --access public --tag latest --registry https://registry.npmjs.org
 
       - name: Publish versioned GitHub release
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
