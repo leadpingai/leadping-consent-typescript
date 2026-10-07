@@ -31,7 +31,8 @@ export interface CaptureReference {
 export interface CaptureOptions {
   /** Absolute HTTPS API origin; no credentials or query string. */
   apiUrl: string;
-  session: CaptureSession;
+  /** A session or a factory that obtains one. Capture starts immediately while the factory is pending. */
+  session: CaptureSession | (() => Promise<CaptureSession>);
   form: HTMLFormElement;
   disclosure: HTMLElement;
   checkbox: HTMLInputElement;

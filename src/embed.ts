@@ -1,3 +1,4 @@
+import { CaptureRejectedError } from './capture-rejected-error.js';
 import { ConsentCapture } from './capture.js';
 import type { CaptureSession, Recipient } from './types.js';
 export { ConsentCapture } from './capture.js';
@@ -16,10 +17,8 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
   status.setAttribute('role', 'status');
   form.append(status);
   let capture: ConsentCapture | undefined;
-  let ready = false;
   let submitted = false;
   const fail = (error: unknown): void => {
-    ready = false;
     status.textContent = 'Unable to complete consent capture. Please reload to start again.';
     form.dispatchEvent(new CustomEvent('leadping:error', { detail: error }));
   };
@@ -32,23 +31,33 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
     throw new Error('Leadping requires an HTTPS portal origin.');
   const endpoint = `${origin.origin}/api/consent`;
   const post = async (path: string, body: unknown): Promise<Response> => {
-    const response = await fetch(endpoint + path, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      credentials: 'omit', redirect: 'error', body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!response.ok) throw new Error(`Leadping request failed (${response.status}).`);
-    return response;
+    const attempts = path.endsWith('/sessions') ? 5 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const response = await fetch(endpoint + path, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          credentials: 'omit', redirect: 'error', body: JSON.stringify(body),
+          signal: AbortSignal.timeout(attempts > 1 ? 15000 : 30000),
+        });
+        if (response.ok) return response;
+        if (response.status < 500 && response.status !== 408 && response.status !== 429)
+          throw new CaptureRejectedError(`Leadping request failed (${response.status}).`);
+        throw new Error(`Leadping request failed (${response.status}).`);
+      } catch (error) {
+        if (error instanceof CaptureRejectedError || attempt === attempts - 1) throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+    }
+    throw new Error('Leadping session could not be started.');
   };
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!ready || submitted || !capture || !form.reportValidity()) return;
+    if (submitted || !capture || !form.reportValidity()) return;
     if (!(checkbox instanceof HTMLInputElement) || !checkbox.checked) {
       status.textContent = 'Please check the consent box before submitting.';
       return;
     }
     submitted = true;
-    ready = false;
     status.textContent = 'Submitting…';
     const values = new FormData(form);
     const recipient: Recipient = {};
@@ -77,12 +86,14 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
   try {
     if (!(disclosure instanceof HTMLElement) || !(checkbox instanceof HTMLInputElement))
       throw new Error('Add data-leadping-disclosure and data-leadping-consent inside the form.');
-    const session = await (await post(`/domains/${encodeURIComponent(domainId)}/sessions`, { pageUrl: location.href, disclosure: disclosure.textContent ?? '' })).json() as CaptureSession;
-    checkbox.checked = false;
-    capture = new ConsentCapture({ apiUrl: origin.origin + '/api', session, form, disclosure, checkbox, onError: fail });
-    window.addEventListener('pagehide', () => { ready = false; capture?.dispose(); }, { once: true });
-    ready = true;
-    status.textContent = '';
+    const pageUrl = location.href;
+    const observedDisclosure = disclosure.textContent ?? '';
+    capture = new ConsentCapture({ apiUrl: origin.origin + '/api',
+      session: async () => (await post(`/domains/${encodeURIComponent(domainId)}/sessions`, { pageUrl, disclosure: observedDisclosure })).json() as Promise<CaptureSession>,
+      form, disclosure, checkbox, onError: fail });
+    window.addEventListener('pagehide', () => { capture?.dispose(); }, { once: true });
+    await capture.ready;
+    if (!submitted) status.textContent = '';
     form.dispatchEvent(new CustomEvent('leadping:ready'));
   } catch (error) { capture?.dispose(); fail(error); throw error; }
 }

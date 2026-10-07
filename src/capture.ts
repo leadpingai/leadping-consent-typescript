@@ -2,7 +2,7 @@ import { record } from 'rrweb';
 import type { eventWithTime } from '@rrweb/types';
 import { EventBuffer } from './event-buffer.js';
 import { CaptureTransport } from './transport.js';
-import type { CaptureOptions, CaptureReference, Recipient, SealedBatch } from './types.js';
+import type { CaptureOptions, CaptureReference, CaptureSession, Recipient, SealedBatch } from './types.js';
 
 /** One form recording per document, matching rrweb's document-level recorder. */
 export class ConsentCapture {
@@ -20,7 +20,12 @@ export class ConsentCapture {
     maxTouchPoints: navigator.maxTouchPoints,
   };
   private readonly buffer = new EventBuffer();
-  private readonly transport: CaptureTransport;
+  private transport?: CaptureTransport;
+  /** Resolves when the service session is available and validated. Recording starts before this. */
+  readonly ready: Promise<void>;
+  private session?: CaptureSession;
+  private readonly observedDisclosure: string;
+  private disposed = false;
   private readonly pending: (SealedBatch | undefined)[] = [];
   private head = 0;
   private queuedBytes = 0;
@@ -37,15 +42,24 @@ export class ConsentCapture {
     const url = new URL(options.apiUrl);
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
       throw new Error('Capture API requires an HTTPS URL without credentials.');
-    if (!/^[0-9a-f-]{36}$/i.test(options.session.sessionId) || options.session.form.origin !== location.origin ||
-      !options.form.contains(options.checkbox) || !options.form.contains(options.disclosure) ||
-      options.checkbox.type !== 'checkbox' || options.checkbox.checked || options.checkbox.defaultChecked ||
-      options.disclosure.textContent !== options.session.form.disclosure)
-      throw new Error('Form does not match the approved disclosure and unchecked consent control.');
-    const remaining = Date.parse(options.session.expiresAt) - Date.now();
-    if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 60 * 60 * 1000)
-      throw new Error('Invalid or expired capture session.');
-    this.transport = new CaptureTransport(url.href.replace(/\/$/, '') + '/consent/sessions/' + options.session.sessionId, options.session.uploadToken);
+    if (!options.form.contains(options.checkbox) || !options.form.contains(options.disclosure) ||
+      options.checkbox.type !== 'checkbox' || options.checkbox.checked || options.checkbox.defaultChecked)
+      throw new Error('Form requires an unchecked consent control and disclosure.');
+    this.observedDisclosure = options.disclosure.textContent ?? '';
+    this.ready = Promise.resolve().then(() => typeof options.session === 'function' ? options.session() : options.session)
+      .then(session => {
+        if (this.disposed || this.failure) throw this.failure ?? new Error('Recorder is disposed.');
+        if (!/^[0-9a-f-]{36}$/i.test(session.sessionId) || session.form.origin !== location.origin ||
+          session.form.disclosure !== this.observedDisclosure)
+          throw new Error('Form does not match the approved disclosure.');
+        const remaining = Date.parse(session.expiresAt) - Date.now();
+        if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 60 * 60 * 1000)
+          throw new Error('Invalid or expired capture session.');
+        this.session = session;
+        this.transport = new CaptureTransport(url.href.replace(/\/$/, '') + '/consent/sessions/' + session.sessionId, session.uploadToken);
+        if (!this.stopped) this.expiry = setTimeout(() => this.fail(new Error('Capture session expired.')), remaining);
+      });
+    void this.ready.then(this.backgroundFlush).catch(error => this.fail(error));
     ConsentCapture.active = this;
     try {
       this.stopRecording = record({
@@ -69,9 +83,8 @@ export class ConsentCapture {
       options.checkbox.addEventListener('change', this.consentChanged);
       document.addEventListener('visibilitychange', this.visibilityChanged);
       this.interval = setInterval(this.backgroundFlush, 3000);
-      this.expiry = setTimeout(() => this.fail(new Error('Capture session expired.')), remaining);
-      record.addCustomEvent('leadping.disclosure', { formId: options.session.form.id });
-    } catch (error) { this.stop(); throw error; }
+      record.addCustomEvent('leadping.disclosure', { disclosure: this.observedDisclosure });
+    } catch (error) { this.dispose(); throw error; }
   }
 
   /** Invoke before submitting your form; send the returned reference to your trusted backend with the lead. */
@@ -83,6 +96,8 @@ export class ConsentCapture {
   async flush(): Promise<void> {
     if (this.failure) throw this.failure;
     this.seal();
+    await this.ready;
+    if (this.failure || this.disposed) throw this.failure ?? new Error('Recorder is disposed.');
     while (this.head < this.pending.length || this.sending) {
       this.sending ??= this.send();
       await this.sending;
@@ -90,22 +105,22 @@ export class ConsentCapture {
     if (this.failure) throw this.failure;
   }
 
-  dispose(): void { this.stop(); this.transport.dispose(); }
+  dispose(): void { this.disposed = true; this.stop(); this.transport?.dispose(); }
 
   private async finishCore(recipient: Recipient): Promise<CaptureReference> {
     if (this.stopped || this.failure) throw this.failure ?? new Error('Recorder is stopped.');
     const observedDisclosure = this.options.disclosure.textContent ?? '';
-    if (observedDisclosure !== this.options.session.form.disclosure)
+    if (observedDisclosure !== this.observedDisclosure)
       throw new Error('The disclosure changed during capture. Start a new approved form session.');
     const accepted = this.options.checkbox.checked;
     record.addCustomEvent('leadping.submit', { accepted });
     this.stop();
     await this.flush();
-    await this.transport.put('/submission', JSON.stringify({
+    await this.transport!.put('/submission', JSON.stringify({
       lastBatchNumber: this.buffer.lastBatchNumber, lastEventNumber: this.buffer.lastEventNumber,
       accepted, observedDisclosure, recipient, browser: this.browser,
     }));
-    return { sessionId: this.options.session.sessionId, uploadToken: this.options.session.uploadToken };
+    return { sessionId: this.session!.sessionId, uploadToken: this.session!.uploadToken };
   }
 
   private readonly emit = (event: eventWithTime): void => {
@@ -134,7 +149,7 @@ export class ConsentCapture {
     try {
       while (this.head < this.pending.length) {
         const batch = this.pending[this.head]!;
-        await this.transport.put('/batches/' + batch.number, batch.body);
+        await this.transport!.put('/batches/' + batch.number, batch.body);
         this.queuedBytes -= batch.body.length * 2;
         this.pending[this.head] = undefined;
         this.head++;
