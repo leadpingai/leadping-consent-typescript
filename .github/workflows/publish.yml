@@ -3,7 +3,6 @@ name: Build and publish consent SDK
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -12,19 +11,103 @@ permissions:
 
 concurrency:
   group: consent-sdk-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.event_name != 'pull_request' && (secrets.GIT__TOKEN || secrets.GH__TOKEN) || github.token }}
+      - name: Prepare version
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        id: version
+        run: |
+          set -euo pipefail
+
+          versions_file="$(mktemp)"
+          git fetch --tags --force
+
+          git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
+            sed -E 's/^v//' |
+            awk '/^[0-9]+\.[0-9]+\.[0-9]+$/ { print }' >> "${versions_file}"
+
+          npm_response="$(mktemp)"
+          registry_status="$(curl -sSL --retry 3 --connect-timeout 15 --max-time 120 -w '%{http_code}' "https://registry.npmjs.org/@leadping%2Fconsent" -o "${npm_response}")"
+          if [ "${registry_status}" = "200" ]; then
+            python3 - "${npm_response}" <<'PY' >> "${versions_file}"
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          for version in data.get("versions", {}):
+              if re.fullmatch(r"\d+\.\d+\.\d+", version):
+                  print(version)
+          PY
+          elif [ "${registry_status}" != "404" ]; then
+            echo "::error::Registry version lookup failed (HTTP ${registry_status})."
+            exit 1
+          fi
+
+          version="$(python3 - "${versions_file}" <<'PY'
+          import re
+          import sys
+
+          best = None
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              for line in handle:
+                  version = line.strip()
+                  if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+                      continue
+
+                  parsed = tuple(int(part) for part in version.split("."))
+                  if best is None or parsed > best:
+                      best = parsed
+
+          if best is None:
+              print("1.0.0")
+          else:
+              major, minor, patch = best
+              print(f"{major}.{minor}.{patch + 1}")
+          PY
+          )"
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must look like 1.2.3."
+            exit 1
+          fi
+
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${tag} already exists."
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
+      - name: Install npm with trusted publishing support
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: npm install --global npm@^11.5.1
       - run: npm ci
+      - name: Set release version
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
       - run: npm run build
       - run: npm test
       - uses: actions/upload-artifact@v4
@@ -32,11 +115,6 @@ jobs:
           name: consent-sdk-dist
           path: dist/
           if-no-files-found: error
-      - name: Check release tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: node --input-type=module -e "import { readFileSync } from 'node:fs'; const { version } = JSON.parse(readFileSync('package.json')); if (process.env.RELEASE_TAG !== 'v' + version) throw new Error('Release tag must match package.json version');"
       - name: Package browser distribution and typed modules
         run: |
           mkdir -p release/site/sdk
@@ -53,52 +131,65 @@ jobs:
           path: release/*
           if-no-files-found: error
 
-  publish-npm:
-    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Install npm with trusted publishing support
-        run: npm install --global npm@^11.5.1
-      - uses: actions/download-artifact@v4
-        with:
-          name: leadping-consent-distribution
-          path: release
-      - name: Publish tested package to npm
-        shell: bash
+      - name: Verify npm trusted publishing context
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           set -euo pipefail
-          version=$(node -p "require('./package.json').version")
-          dist_tag=latest
-          if [[ "$version" == *-* ]]; then dist_tag=next; fi
-          npm publish "release/leadping-consent-${version}.tgz" --access public --tag "$dist_tag" --registry https://registry.npmjs.org
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, publish-npm]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: leadping-consent-distribution
-          path: release
-      - name: Publish versioned GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          node --version
+          npm --version
+
+          if [ -n "${NPM_TOKEN:-}" ] || [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN/NODE_AUTH_TOKEN must not be set for npm trusted publishing."
+            exit 1
           fi
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::GitHub OIDC environment is unavailable. Check id-token: write permissions and use a GitHub-hosted runner."
+            exit 1
+          fi
+
+      - name: Commit release version
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GIT_EMAIL: ${{ secrets.GIT__EMAIL || 'support@leadping.ai' }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "leadpingai-bot"
+          git config user.email "${GIT_EMAIL}"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Release ${TAG} [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+      # Reserve the version before publishing so retries select a fresh version.
+      - name: Reserve release version
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag "${TAG}"
+          git push origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+      - name: Publish tested package to npm
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          NPM_CONFIG_PROVENANCE: false
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm publish "release/leadping-consent-${RELEASE_VERSION}.tgz" --access public --tag latest --registry https://registry.npmjs.org
+
+      - name: Publish versioned GitHub release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GH__TOKEN || secrets.GIT__TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes
           gh release upload "$RELEASE_TAG" release/*.js release/*.map release/*.txt release/*.tgz release/*.tar.gz release/SHA256SUMS --clobber
