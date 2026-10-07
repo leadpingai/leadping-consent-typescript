@@ -14,8 +14,10 @@ await build({
   bundle: true, minify: true, sourcemap: true, format: 'esm', target: 'es2022',
   legalComments: 'external',
 });
-await build({
-  entryPoints: ['src/embed.ts'], outfile: 'dist/leadping-consent.min.js',
-  bundle: true, minify: true, sourcemap: true, format: 'iife', globalName: 'LeadpingConsent',
-  target: 'es2022', legalComments: 'external',
-});
+for (const minify of [false, true]) {
+  await build({
+    entryPoints: ['src/embed.ts'], outfile: `dist/leadping-consent${minify ? '.min' : ''}.js`,
+    bundle: true, minify, sourcemap: true, format: 'iife', globalName: 'LeadpingConsent',
+    target: 'es2022', legalComments: 'external',
+  });
+}
