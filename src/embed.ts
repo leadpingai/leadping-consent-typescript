@@ -62,7 +62,7 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
       issuingCertificate = true;
       const certificate = await (await post('/certificates', consentCapture)).json() as { certificateId: string };
       if (!/^[0-9a-f-]{36}$/i.test(certificate.certificateId)) throw new Error('Invalid certificate response.');
-      const certificateUrl = `${portal.origin}/certificates/${certificate.certificateId}`;
+      const certificateUrl = `${portal.origin}/${certificate.certificateId}`;
       status.textContent = `Certificate received: ${certificate.certificateId}. `;
       const link = document.createElement('a');
       link.href = certificateUrl; link.textContent = 'View certificate and replay';

@@ -23,7 +23,7 @@ Register your website's allowed origins with the consent service, then replace `
 
 Use your actual disclosure text. The script records that text; it does not supply or approve it. It captures the current page URL automatically, including its query string and fragment. The recorder captures the whole document with unmasked input values.
 
-On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://certificate.leadping.ai/certificates/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
+On submission the script finalizes recording, obtains a certificate, and displays its ID and link at `https://certificate.leadping.ai/{id}`. No customer backend or source API key is required. The script owns form submission; remove competing submission handlers.
 
 Pin the URL to a published npm version. Use the classic script at `dist/leadping-consent.min.js`, not the ES module under `dist/browser`.
 
