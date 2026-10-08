@@ -10,6 +10,8 @@ export interface ConsentForm {
 
 /** Obtain from your backend. Never put a Leadping source API key in the browser. */
 export interface CaptureSession {
+  /** The service accepts a small final recording batch with submission. */
+  supportsFinalBatch?: boolean;
   sessionId: string;
   uploadToken: string;
   expiresAt: string;

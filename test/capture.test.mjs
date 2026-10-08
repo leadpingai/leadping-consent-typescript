@@ -29,6 +29,55 @@ const session = () => ({ sessionId: '10000000-0000-0000-0000-000000000001', uplo
   expiresAt: new Date(Date.now() + 600000).toISOString(), maxReplaySeconds: 600,
   form: { id: 'form', origin: location.origin, disclosure: 'I agree.' } });
 
+test('streams before submission and closes with only one request containing the final events', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return new Response(null, { status: 204 });
+  };
+  const { capture, checkbox } = fixture(async () => ({ ...session(), supportsFinalBatch: true }));
+  try {
+    await capture.ready;
+    await capture.flush();
+    emitCapture({ type: 3, timestamp: 3, data: { text: 'streamed input' } });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assert.ok(requests.some(r => r.body.events?.some(e => e.data.text === 'streamed input')));
+    const before = requests.length;
+    checkbox.checked = true;
+    await capture.finish({ email: 'test@example.com' });
+    assert.equal(requests.length, before + 1);
+    const submission = requests.at(-1);
+    assert.ok(submission.url.endsWith('/submission'));
+    assert.ok(submission.body.finalBatch.events.some(e => e.data.tag === 'leadping.submit'));
+    const events = requests.slice(0, -1).flatMap(r => r.body.events).concat(submission.body.finalBatch.events);
+    assert.equal(submission.body.lastEventNumber, events.length - 1);
+    assert.equal(submission.body.lastBatchNumber, before);
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
+test('large final changes drain as batches instead of exceeding the finish request limit', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    let body = init.body;
+    if (init.headers['Content-Encoding']) body = await new Response(new Blob([body]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    requests.push({ url, body: JSON.parse(body) });
+    return new Response(null, { status: 204 });
+  };
+  const { capture } = fixture(async () => ({ ...session(), supportsFinalBatch: true }));
+  try {
+    await capture.ready;
+    await capture.flush();
+    emitCapture({ type: 3, timestamp: 3, data: { text: 'x'.repeat(10000) } });
+    const before = requests.length;
+    await capture.finish({ email: 'test@example.com' });
+    assert.equal(requests.length, before + 2);
+    assert.ok(requests.at(-2).url.includes('/batches/'));
+    assert.equal(requests.at(-1).body.finalBatch, undefined);
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
 test('records early input and consent, then drains in order before submitting', async () => {
   let resolve;
   const pending = new Promise(done => { resolve = done; });

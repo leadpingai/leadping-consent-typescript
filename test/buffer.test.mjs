@@ -30,7 +30,7 @@ test('oversized events fail instead of dropping data', () => {
 
 test('session batch limit is enforced', () => {
   const buffer = new EventBuffer();
-  for (let n = 0; n < 1024; n++) { buffer.append('{}'); buffer.seal(); }
+  for (let n = 0; n < 4096; n++) { buffer.append('{}'); buffer.seal(); }
   buffer.append('{}');
   assert.throws(() => buffer.seal(), /session batch limit/);
 });

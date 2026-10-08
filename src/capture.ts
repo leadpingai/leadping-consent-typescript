@@ -1,6 +1,6 @@
 import { record } from 'rrweb';
 import type { eventWithTime } from '@rrweb/types';
-import { EventBuffer } from './event-buffer.js';
+import { EventBuffer, utf8Length } from './event-buffer.js';
 import { CaptureTransport } from './transport.js';
 import { ReplayDeadline } from './replay-deadline.js';
 import { ReplayLimitExceededError } from './replay-limit-exceeded-error.js';
@@ -87,7 +87,7 @@ export class ConsentCapture {
       if (!this.stopRecording || this.failure) throw this.failure ?? new Error('Recorder failed to start.');
       options.checkbox.addEventListener('change', this.consentChanged);
       document.addEventListener('visibilitychange', this.visibilityChanged);
-      this.interval = setInterval(this.backgroundFlush, 3000);
+      this.interval = setInterval(this.backgroundFlush, 1000);
       record.addCustomEvent('leadping.disclosure', { disclosure: this.observedDisclosure });
     } catch (error) { this.dispose(); throw error; }
   }
@@ -122,13 +122,18 @@ export class ConsentCapture {
     const accepted = this.options.checkbox.checked;
     record.addCustomEvent('leadping.submit', { accepted });
     this.stop();
+    // Keep the finish request small. Large last-moment DOM changes still use the batch path.
+    const assertion = { accepted, observedDisclosure, recipient, browser: this.browser };
+    const finalBatch = this.session?.supportsFinalBatch && this.buffer.byteLength <= 8192 &&
+      utf8Length(JSON.stringify(assertion)) + this.buffer.byteLength + 256 <= 32768 ? this.buffer.seal() : undefined;
     this.options.onProgress?.('uploading');
     await this.flush();
     this.deadline.assertWithinLimit();
     this.options.onProgress?.('submitting');
     await this.transport!.put(this.options.issueCertificate ? '/submission/certificate' : '/submission', JSON.stringify({
       lastBatchNumber: this.buffer.lastBatchNumber, lastEventNumber: this.buffer.lastEventNumber,
-      accepted, observedDisclosure, recipient, browser: this.browser,
+      ...assertion,
+      finalBatch: finalBatch ? JSON.parse(finalBatch.body) : undefined,
     }));
     return { sessionId: this.session!.sessionId, uploadToken: this.session!.uploadToken };
   }
