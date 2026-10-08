@@ -1,6 +1,6 @@
 {
   "name": "@leadping/consent",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Leadping consent capture SDK for browser forms.",
   "repository": {
     "type": "git",
