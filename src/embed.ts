@@ -1,7 +1,9 @@
 import { CaptureRejectedError } from './capture-rejected-error.js';
 import { ConsentCapture } from './capture.js';
+import { ReplayLimitExceededError } from './replay-limit-exceeded-error.js';
 import type { CaptureSession, Recipient } from './types.js';
 export { ConsentCapture } from './capture.js';
+export { ReplayLimitExceededError } from './replay-limit-exceeded-error.js';
 
 /** Attach the Leadping-hosted capture and submission flow to a form. */
 export async function attach(script: HTMLScriptElement): Promise<void> {
@@ -19,7 +21,8 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
   let capture: ConsentCapture | undefined;
   let submitted = false;
   const fail = (error: unknown): void => {
-    status.textContent = 'Unable to complete consent capture. Please reload to start again.';
+    status.textContent = error instanceof ReplayLimitExceededError ? error.message
+      : 'Unable to complete consent capture. Please reload to start again.';
     form.dispatchEvent(new CustomEvent('leadping:error', { detail: error }));
   };
   const origin = new URL(script.dataset.apiUrl ?? 'https://consent.leadping.ai');
@@ -30,6 +33,9 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
   if (portal.protocol !== 'https:' || portal.username || portal.password || portal.search || portal.hash || portal.pathname !== '/')
     throw new Error('Leadping requires an HTTPS portal origin.');
   const endpoint = `${origin.origin}/api/consent`;
+  const progress = (stage: string): void => {
+    form.dispatchEvent(new CustomEvent('leadping:progress', { detail: { stage } }));
+  };
   const post = async (path: string, body: unknown): Promise<Response> => {
     const attempts = path.endsWith('/sessions') ? 5 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -65,21 +71,19 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
       const value = values.get(key);
       if (typeof value === 'string' && value) recipient[key] = value;
     }
-    let issuingCertificate = false;
     try {
       const consentCapture = await capture.finish(recipient);
-      issuingCertificate = true;
-      const certificate = await (await post('/certificates', consentCapture)).json() as { certificateId: string };
-      if (!/^[0-9a-f-]{36}$/i.test(certificate.certificateId)) throw new Error('Invalid certificate response.');
+      const certificate = { certificateId: consentCapture.sessionId };
       const certificateUrl = `${portal.origin}/${certificate.certificateId}`;
-      status.textContent = `Certificate received: ${certificate.certificateId}. `;
+      status.textContent = `Submission saved. Certificate: ${certificate.certificateId}. `;
       const link = document.createElement('a');
       link.href = certificateUrl; link.textContent = 'View certificate and replay';
       link.target = '_blank'; link.rel = 'noopener noreferrer'; status.append(link);
       form.dispatchEvent(new CustomEvent('leadping:success', { detail: { certificateId: certificate.certificateId, certificateUrl } }));
     } catch (error) {
       fail(error);
-      if (issuingCertificate) status.textContent = 'Certificate issuance could not be confirmed. Please check before starting another recording.';
+      if (!(error instanceof ReplayLimitExceededError))
+        status.textContent = 'Submission could not be confirmed. Keep the certificate ID and check before starting another recording.';
     } finally { capture.dispose(); }
   });
   status.textContent = 'Loading consent…';
@@ -90,11 +94,22 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
     const observedDisclosure = disclosure.textContent ?? '';
     capture = new ConsentCapture({ apiUrl: origin.origin + '/api',
       session: async () => (await post(`/domains/${encodeURIComponent(domainId)}/sessions`, { pageUrl, disclosure: observedDisclosure })).json() as Promise<CaptureSession>,
-      form, disclosure, checkbox, onError: fail });
+      form, disclosure, checkbox, issueCertificate: true, onError: fail, onProgress: stage => {
+        status.textContent = stage === 'uploading' ? 'Saving recording…' : 'Saving submission and requesting certificate…';
+        progress(stage);
+      } });
     window.addEventListener('pagehide', () => { capture?.dispose(); }, { once: true });
     await capture.ready;
+    const certificateId = capture.sessionId!;
+    const certificateUrl = `${portal.origin}/${certificateId}`;
+    for (const [name, value] of Object.entries({ leadping_certificate_id: certificateId, leadping_certificate_url: certificateUrl })) {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = name; input.value = value;
+      form.append(input);
+    }
     if (!submitted) status.textContent = '';
-    form.dispatchEvent(new CustomEvent('leadping:ready'));
+    form.dispatchEvent(new CustomEvent('leadping:ready', { detail: { certificateId, certificateUrl,
+      maxReplaySeconds: capture.maxReplaySeconds } }));
   } catch (error) { capture?.dispose(); fail(error); throw error; }
 }
 

@@ -2,6 +2,8 @@ import { record } from 'rrweb';
 import type { eventWithTime } from '@rrweb/types';
 import { EventBuffer } from './event-buffer.js';
 import { CaptureTransport } from './transport.js';
+import { ReplayDeadline } from './replay-deadline.js';
+import { ReplayLimitExceededError } from './replay-limit-exceeded-error.js';
 import type { CaptureOptions, CaptureReference, CaptureSession, Recipient, SealedBatch } from './types.js';
 
 /** One form recording per document, matching rrweb's document-level recorder. */
@@ -20,9 +22,14 @@ export class ConsentCapture {
     maxTouchPoints: navigator.maxTouchPoints,
   };
   private readonly buffer = new EventBuffer();
+  private readonly deadline = new ReplayDeadline();
   private transport?: CaptureTransport;
   /** Resolves when the service session is available and validated. Recording starts before this. */
   readonly ready: Promise<void>;
+  /** Allocated as soon as the session is ready; this does not assert that submission is saved. */
+  get sessionId(): string | undefined { return this.session?.sessionId; }
+  /** The server-selected duration limit, available after ready resolves. */
+  get maxReplaySeconds(): number | undefined { return this.session?.maxReplaySeconds; }
   private session?: CaptureSession;
   private readonly observedDisclosure: string;
   private disposed = false;
@@ -52,12 +59,10 @@ export class ConsentCapture {
         if (!/^[0-9a-f-]{36}$/i.test(session.sessionId) || session.form.origin !== location.origin ||
           session.form.disclosure !== this.observedDisclosure)
           throw new Error('Form does not match the approved disclosure.');
-        const remaining = Date.parse(session.expiresAt) - Date.now();
-        if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 60 * 60 * 1000)
-          throw new Error('Invalid or expired capture session.');
+        this.deadline.configure(session.expiresAt, session.maxReplaySeconds);
         this.session = session;
         this.transport = new CaptureTransport(url.href.replace(/\/$/, '') + '/consent/sessions/' + session.sessionId, session.uploadToken);
-        if (!this.stopped) this.expiry = setTimeout(() => this.fail(new Error('Capture session expired.')), remaining);
+        if (!this.stopped) this.expiry = setTimeout(() => this.fail(new ReplayLimitExceededError()), this.deadline.remainingMilliseconds);
       });
     void this.ready.then(this.backgroundFlush).catch(error => this.fail(error));
     ConsentCapture.active = this;
@@ -109,14 +114,19 @@ export class ConsentCapture {
 
   private async finishCore(recipient: Recipient): Promise<CaptureReference> {
     if (this.stopped || this.failure) throw this.failure ?? new Error('Recorder is stopped.');
+    try { this.deadline.assertWithinLimit(); }
+    catch (error) { this.fail(error as Error); throw error; }
     const observedDisclosure = this.options.disclosure.textContent ?? '';
     if (observedDisclosure !== this.observedDisclosure)
       throw new Error('The disclosure changed during capture. Start a new approved form session.');
     const accepted = this.options.checkbox.checked;
     record.addCustomEvent('leadping.submit', { accepted });
     this.stop();
+    this.options.onProgress?.('uploading');
     await this.flush();
-    await this.transport!.put('/submission', JSON.stringify({
+    this.deadline.assertWithinLimit();
+    this.options.onProgress?.('submitting');
+    await this.transport!.put(this.options.issueCertificate ? '/submission/certificate' : '/submission', JSON.stringify({
       lastBatchNumber: this.buffer.lastBatchNumber, lastEventNumber: this.buffer.lastEventNumber,
       accepted, observedDisclosure, recipient, browser: this.browser,
     }));
@@ -136,7 +146,7 @@ export class ConsentCapture {
   private seal(): void {
     const batch = this.buffer.seal();
     if (!batch) return;
-    // UTF-16 string budget including queued/retrying batches. One in-flight compressed copy is additional.
+    // UTF-16 string budget including queued/retrying batches. Up to three compressed copies are additional.
     if (this.queuedBytes + batch.body.length * 2 > 2 * 1024 * 1024)
       throw new Error('Recording upload backlog exceeded 2 MiB.');
     this.pending.push(batch);
@@ -147,21 +157,31 @@ export class ConsentCapture {
     // Defer so this.sending is assigned before this function can finish.
     await Promise.resolve();
     try {
-      while (this.head < this.pending.length) {
-        const batch = this.pending[this.head]!;
-        await this.transport!.put('/batches/' + batch.number, batch.body);
-        this.queuedBytes -= batch.body.length * 2;
-        this.pending[this.head] = undefined;
-        this.head++;
-        if (this.head === this.pending.length) { this.pending.length = 0; this.head = 0; }
-      }
+      // Batches are immutable and individually numbered. Completion order need not match
+      // recording order; submission still waits for every durable acknowledgment.
+      await Promise.all(Array.from({ length: 3 }, async () => {
+        while (!this.failure && !this.disposed && this.head < this.pending.length) {
+          const index = this.head++;
+          const batch = this.pending[index]!;
+          await this.transport!.put('/batches/' + batch.number, batch.body);
+          this.queuedBytes -= batch.body.length * 2;
+          this.pending[index] = undefined;
+        }
+      }));
+      // A concurrent flush may append after the last worker exits but before this continuation.
+      if (this.head === this.pending.length) { this.pending.length = 0; this.head = 0; }
     } catch (error) {
+      this.transport?.dispose();
       this.fail(error instanceof Error ? error : new Error('Capture upload failed.'));
       throw this.failure;
     } finally { this.sending = undefined; }
   }
 
-  private readonly consentChanged = (): void => record.addCustomEvent('leadping.consent', { accepted: this.options.checkbox.checked });
+  private readonly consentChanged = (): void => {
+    record.addCustomEvent('leadping.consent', { accepted: this.options.checkbox.checked });
+    // Start draining while the visitor moves from consenting to submitting.
+    if (this.options.checkbox.checked) this.backgroundFlush();
+  };
   private readonly visibilityChanged = (): void => { if (document.visibilityState === 'hidden') this.backgroundFlush(); };
   private readonly backgroundFlush = (): void => { void this.flush().catch(error => this.fail(error)); };
 

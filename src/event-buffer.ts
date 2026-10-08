@@ -42,7 +42,7 @@ export class EventBuffer {
 
   seal(): SealedBatch | undefined {
     if (this.events.length === 0) return;
-    if (this.nextBatch >= 256) throw new Error('Recording exceeded the session batch limit.');
+    if (this.nextBatch >= 1024) throw new Error('Recording exceeded the session batch limit.');
     const first = this.nextEvent - this.events.length;
     const body = `{"firstEventNumber":${first},"events":[${this.events.join(',')}]}`;
     this.events.length = 0;

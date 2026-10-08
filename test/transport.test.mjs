@@ -25,3 +25,14 @@ test('permanent conflict is not retried', async () => {
     assert.equal(calls, 1);
   } finally { globalThis.fetch = original; }
 });
+
+test('expired recording returns a specific error without retrying', async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(null, { status: 410 }); };
+  try {
+    await assert.rejects(new CaptureTransport('https://consent.example', 'capability').put('/submission/certificate', '{}'),
+      error => error.code === 'replay_limit_exceeded');
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = original; }
+});

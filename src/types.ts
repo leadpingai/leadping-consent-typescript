@@ -13,6 +13,8 @@ export interface CaptureSession {
   sessionId: string;
   uploadToken: string;
   expiresAt: string;
+  /** Maximum elapsed recording time including idle time, supplied by the service. */
+  maxReplaySeconds: number;
   form: ConsentForm;
 }
 
@@ -36,8 +38,12 @@ export interface CaptureOptions {
   form: HTMLFormElement;
   disclosure: HTMLElement;
   checkbox: HTMLInputElement;
+  /** For public domain sessions, durably request a certificate with the final submission. */
+  issueCertificate?: boolean;
   /** Called on terminal capture failures; never includes captured values. */
   onError?: (error: Error) => void;
+  /** Submission stages; no captured values or upload credentials are included. */
+  onProgress?: (stage: 'uploading' | 'submitting') => void;
 }
 
 export interface SealedBatch {

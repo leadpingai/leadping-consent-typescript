@@ -22,7 +22,7 @@ window.fetch = async (url, init) => {
 const form = document.querySelector('#form');
 const capture = new ConsentCapture({ apiUrl: 'https://capture.example', form,
   disclosure: document.querySelector('#disclosure'), checkbox: document.querySelector('#agree'),
-  session: { sessionId: '10000000-0000-0000-0000-000000000001', uploadToken: 'test-only', expiresAt: new Date(Date.now()+600000).toISOString(),
+  session: { sessionId: '10000000-0000-0000-0000-000000000001', uploadToken: 'test-only', expiresAt: new Date(Date.now()+600000).toISOString(), maxReplaySeconds: 600,
     form: { id:'test', sourceId:'test', origin:location.origin, disclosure:'I agree.', sellers:['Test'], channels:['sms'], approvedForContact:false } },
   onError: error => window.captureErrors.push(error.message)
 });

@@ -1,6 +1,7 @@
 import { CaptureRejectedError } from './capture-rejected-error.js';
+import { ReplayLimitExceededError } from './replay-limit-exceeded-error.js';
 
-/** Serial, bounded retry transport. A resolved request means durable server acknowledgment. */
+/** Bounded retry transport. A resolved request means durable server acknowledgment. */
 export class CaptureTransport {
   private readonly abort = new AbortController();
 
@@ -23,10 +24,11 @@ export class CaptureTransport {
           signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000)]),
         });
         if (response.ok) return;
+        if (response.status === 410) throw new ReplayLimitExceededError();
         if (response.status < 500 && response.status !== 408 && response.status !== 429)
           throw new CaptureRejectedError(`Capture rejected (${response.status}).`);
       } catch (error) {
-        if (error instanceof CaptureRejectedError || this.abort.signal.aborted) throw error;
+        if (error instanceof CaptureRejectedError || error instanceof ReplayLimitExceededError || this.abort.signal.aborted) throw error;
       }
       if (attempt === 4) break;
       await this.delay(Math.min(8000, 500 * 2 ** attempt) + Math.random() * 250);

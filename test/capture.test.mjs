@@ -13,7 +13,7 @@ const bundle = await build({ entryPoints: ['src/capture.ts'], bundle: true, writ
 }] });
 const { ConsentCapture } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 
-function fixture(session) {
+function fixture(session, options = {}) {
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
   globalThis.screen = {};
   globalThis.window = { devicePixelRatio: 1 };
@@ -22,11 +22,12 @@ function fixture(session) {
   const checkbox = Object.assign(new EventTarget(), { type: 'checkbox', checked: false, defaultChecked: false });
   const disclosure = { textContent: 'I agree.' };
   const capture = new ConsentCapture({ apiUrl: 'https://capture.example', session,
-    form: { contains: element => element === checkbox || element === disclosure }, checkbox, disclosure });
+    form: { contains: element => element === checkbox || element === disclosure }, checkbox, disclosure, ...options });
   return { capture, checkbox };
 }
 const session = () => ({ sessionId: '10000000-0000-0000-0000-000000000001', uploadToken: 'token',
-  expiresAt: new Date(Date.now() + 600000).toISOString(), form: { id: 'form', origin: location.origin, disclosure: 'I agree.' } });
+  expiresAt: new Date(Date.now() + 600000).toISOString(), maxReplaySeconds: 600,
+  form: { id: 'form', origin: location.origin, disclosure: 'I agree.' } });
 
 test('records early input and consent, then drains in order before submitting', async () => {
   let resolve;
@@ -70,4 +71,109 @@ test('disposing while the service is pending prevents late initialization', asyn
   capture.dispose();
   resolve(session());
   await assert.rejects(capture.ready, /disposed/);
+});
+
+test('drains batches with bounded concurrency and never submits ahead of an acknowledgment', async () => {
+  const original = globalThis.fetch;
+  const uploads = [];
+  let submitted = false;
+  let active = 0;
+  let peak = 0;
+  globalThis.fetch = (url) => {
+    if (url.endsWith('/submission')) {
+      submitted = true;
+      assert.equal(active, 0);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    active++;
+    peak = Math.max(peak, active);
+    return new Promise(resolve => uploads.push({ url, done: () => {
+      active--;
+      resolve(new Response(null, { status: 204 }));
+    } }));
+  };
+  let resolve;
+  const { capture } = fixture(() => new Promise(done => { resolve = done; }));
+  try {
+    // Seal separately while session creation is pending so all workers have work.
+    const flushes = [];
+    for (let i = 0; i < 7; i++) {
+      emitCapture({ type: 3, timestamp: i + 3, data: { text: `event-${i}` } });
+      flushes.push(capture.flush());
+    }
+    const finished = capture.finish({ email: 'test@example.com' });
+    await Promise.resolve();
+    resolve(session());
+    const tick = () => new Promise(done => setImmediate(done));
+    await tick();
+    assert.equal(uploads.length, 3);
+    assert.equal(submitted, false);
+    // Hold batch zero while other workers continue; ordering is in the batch numbers.
+    for (let i = 1; i < 8; i++) {
+      assert.ok(uploads[i], `batch ${i} should be scheduled`);
+      uploads[i].done();
+      await tick();
+      assert.equal(submitted, false);
+    }
+    uploads[0].done();
+    await Promise.all([...flushes, finished]);
+    assert.equal(peak, 3);
+    assert.equal(submitted, true);
+    assert.equal(new Set(uploads.map(upload => upload.url)).size, 8);
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
+test('a failed parallel upload prevents submission and aborts outstanding requests', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, signal: init.signal });
+    return new Response(null, { status: url.endsWith('/batches/0') ? 409 : 204 });
+  };
+  const { capture } = fixture(async () => session());
+  try {
+    await assert.rejects(capture.finish({ email: 'test@example.com' }), /409/);
+    assert.ok(requests.length);
+    assert.ok(requests.every(request => !request.url.endsWith('/submission')));
+    assert.ok(requests.every(request => request.signal.aborted));
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
+test('exposes the allocated ID before submission and requests the certificate in the final save', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  const stages = [];
+  globalThis.fetch = async url => {
+    requests.push(url);
+    return new Response(null, { status: url.endsWith('/submission/certificate') ? 202 : 204 });
+  };
+  const { capture } = fixture(async () => session(), { issueCertificate: true, onProgress: stage => stages.push(stage) });
+  try {
+    await capture.ready;
+    assert.equal(capture.sessionId, session().sessionId);
+    assert.ok(requests.every(url => !url.includes('/submission')));
+    const reference = await capture.finish({ email: 'test@example.com' });
+    assert.equal(reference.sessionId, capture.sessionId);
+    assert.ok(requests.at(-1).endsWith('/submission/certificate'));
+    assert.deepEqual(stages, ['uploading', 'submitting']);
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
+test('submission checks elapsed time even before a suspended tab can run its expiry timer', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  const requests = [];
+  const failures = [];
+  globalThis.fetch = async url => { requests.push(url); return new Response(null, { status: 204 }); };
+  const { capture } = fixture(async () => session(), { onError: error => failures.push(error) });
+  try {
+    await capture.ready;
+    await capture.flush();
+    const before = requests.length;
+    Date.now = () => originalNow() + 600_001;
+    await assert.rejects(capture.finish({ email: 'test@example.com' }), error => error.code === 'replay_limit_exceeded');
+    assert.equal(requests.length, before, 'must not send submission after the deadline');
+    assert.equal(failures[0].code, 'replay_limit_exceeded');
+    assert.match(failures[0].message, /wasn't captured/);
+  } finally { Date.now = originalNow; capture.dispose(); globalThis.fetch = originalFetch; }
 });
