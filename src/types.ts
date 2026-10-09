@@ -34,6 +34,11 @@ export interface CaptureReference {
   uploadToken: string;
 }
 
+/**
+ * Replay masks input values and excludes credential/hidden controls. Use rr-block,
+ * rr-ignore, or data-leadping-exclude on an element to exclude its subtree; rr-mask
+ * or data-leadping-mask masks text. Keep the disclosure and consent control visible.
+ */
 export interface CaptureOptions {
   /** Absolute HTTPS API origin; no credentials or query string. */
   apiUrl: string;

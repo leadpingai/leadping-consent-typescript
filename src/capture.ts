@@ -1,4 +1,5 @@
 import { record } from 'rrweb';
+import { assertRecordableConsent, recordingPrivacy } from './recording-privacy.js';
 import type { eventWithTime } from '@rrweb/types';
 import { EventBuffer, utf8Length } from './event-buffer.js';
 import { CaptureTransport } from './transport.js';
@@ -46,6 +47,7 @@ export class ConsentCapture {
 
   constructor(private readonly options: CaptureOptions) {
     if (ConsentCapture.active) throw new Error('Only one consent recorder may run in a document.');
+    assertRecordableConsent(options.disclosure, options.checkbox);
     const url = new URL(options.apiUrl);
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
       throw new Error('Capture API requires an HTTPS URL without credentials.');
@@ -69,12 +71,7 @@ export class ConsentCapture {
     try {
       this.stopRecording = record({
         emit: this.emit,
-        // Override rrweb defaults as well as Leadping selectors: preserve original values.
-        maskAllInputs: false,
-        maskInputOptions: {},
-        maskTextClass: /$^/,
-        blockClass: /$^/,
-        ignoreClass: '',
+        ...recordingPrivacy,
         slimDOMOptions: {},
         inlineStylesheet: true,
         inlineImages: true,
@@ -123,6 +120,7 @@ export class ConsentCapture {
     if (this.stopped || this.failure) throw this.failure ?? new Error('Recorder is stopped.');
     try { this.deadline.assertWithinLimit(); }
     catch (error) { this.fail(error as Error); throw error; }
+    assertRecordableConsent(this.options.disclosure, this.options.checkbox);
     const observedDisclosure = this.options.disclosure.textContent ?? '';
     if (observedDisclosure !== this.observedDisclosure)
       throw new Error('The disclosure changed during capture. Start a new approved form session.');

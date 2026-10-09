@@ -32,6 +32,7 @@
   "scripts": {
     "build": "tsc && node build.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:privacy": "node --test test/privacy.browser.mjs",
     "benchmark": "node test/benchmark.mjs"
   },
   "dependencies": {

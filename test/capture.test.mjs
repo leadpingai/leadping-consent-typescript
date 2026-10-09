@@ -19,15 +19,31 @@ function fixture(session, options = {}) {
   globalThis.window = { devicePixelRatio: 1 };
   globalThis.location = { origin: 'https://form.example' };
   globalThis.document = new EventTarget();
-  const checkbox = Object.assign(new EventTarget(), { type: 'checkbox', checked: false, defaultChecked: false });
-  const disclosure = { textContent: 'I agree.' };
+  const checkbox = Object.assign(new EventTarget(), { type: 'checkbox', checked: false, defaultChecked: false, closest: () => null });
+  const disclosure = { textContent: 'I agree.', closest: () => null, querySelector: () => null };
   const capture = new ConsentCapture({ apiUrl: 'https://capture.example', session,
     form: { contains: element => element === checkbox || element === disclosure }, checkbox, disclosure, ...options });
-  return { capture, checkbox };
+  return { capture, checkbox, disclosure };
 }
 const session = () => ({ sessionId: '10000000-0000-0000-0000-000000000001', uploadToken: 'token',
   expiresAt: new Date(Date.now() + 600000).toISOString(), maxReplaySeconds: 600,
   form: { id: 'form', origin: location.origin, disclosure: 'I agree.' } });
+
+test('a disclosure excluded after recording starts cannot bypass privacy through submission', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async url => { requests.push(url); return new Response(null, { status: 204 }); };
+  const { capture, disclosure } = fixture(async () => session());
+  try {
+    await capture.ready;
+    await capture.flush();
+    const before = requests.length;
+    disclosure.closest = () => ({ className: 'rr-block' });
+    await assert.rejects(capture.finish({}), /excluded or masked/);
+    assert.equal(requests.length, before);
+    assert.ok(requests.every(url => !url.includes('/submission')));
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
 
 test('large early snapshots and mutations drain completely before submission with bounded requests', async () => {
   const original = globalThis.fetch;
