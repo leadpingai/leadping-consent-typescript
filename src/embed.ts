@@ -39,6 +39,7 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
   const post = async (path: string, body: unknown): Promise<Response> => {
     const attempts = path.endsWith('/sessions') ? 5 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
+      let retryDelay = 500 * 2 ** attempt;
       try {
         const response = await fetch(endpoint + path, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -48,11 +49,16 @@ export async function attach(script: HTMLScriptElement): Promise<void> {
         if (response.ok) return response;
         if (response.status < 500 && response.status !== 408 && response.status !== 429)
           throw new CaptureRejectedError(`Leadping request failed (${response.status}).`);
+        const retryAfter = response.headers.get('Retry-After');
+        if (retryAfter) {
+          const milliseconds = /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+          if (Number.isFinite(milliseconds)) retryDelay = Math.max(retryDelay, Math.min(120000, milliseconds));
+        }
         throw new Error(`Leadping request failed (${response.status}).`);
       } catch (error) {
         if (error instanceof CaptureRejectedError || attempt === attempts - 1) throw error;
       }
-      await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
     throw new Error('Leadping session could not be started.');
   };

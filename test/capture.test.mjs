@@ -29,6 +29,54 @@ const session = () => ({ sessionId: '10000000-0000-0000-0000-000000000001', uplo
   expiresAt: new Date(Date.now() + 600000).toISOString(), maxReplaySeconds: 600,
   form: { id: 'form', origin: location.origin, disclosure: 'I agree.' } });
 
+test('large early snapshots and mutations drain completely before submission with bounded requests', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    let text = init.body;
+    if (init.headers['Content-Encoding'])
+      text = await new Response(new Blob([text]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    assert.ok(Buffer.byteLength(text) <= 262144);
+    requests.push({ url, body: JSON.parse(text) });
+    return new Response(null, { status: 204 });
+  };
+  let resolve;
+  const { capture } = fixture(() => new Promise(done => { resolve = done; }));
+  const snapshot = { type: 2, timestamp: 3, data: { text: '🌍漢é'.repeat(700000) } };
+  const mutation = { type: 3, timestamp: 4, data: { text: 'y'.repeat(1000000) } };
+  try {
+    emitCapture(snapshot);
+    emitCapture(mutation);
+    const finished = capture.finish({ email: 'test@example.com' });
+    await Promise.resolve();
+    assert.equal(requests.length, 0);
+    resolve({ ...session(), supportsEventFragments: true, supportsFinalBatch: true });
+    await finished;
+    assert.ok(requests.at(-1).url.endsWith('/submission'));
+    const batches = requests.filter(r => r.url.includes('/batches/'))
+      .sort((a,b) => Number(a.url.split('/').at(-1)) - Number(b.url.split('/').at(-1)));
+    for (const expected of [snapshot, mutation]) {
+      const chunks = batches.map(b => b.body.eventFragment).filter(f => f?.timestamp === expected.timestamp);
+      assert.ok(chunks.length > 1);
+      const restored = Buffer.concat(chunks.map(f => Buffer.from(f.data, 'base64'))).toString('utf8');
+      assert.deepEqual(JSON.parse(restored), expected);
+    }
+    assert.equal(requests.at(-1).body.lastEventNumber, 4);
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
+test('large recordings fail explicitly against a service without fragment support', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async url => { requests.push(url); return new Response(null, { status: 204 }); };
+  const { capture } = fixture(async () => session());
+  try {
+    emitCapture({ type: 2, timestamp: 3, data: { text: 'x'.repeat(300000) } });
+    await assert.rejects(capture.finish({}), /service must be updated/);
+    assert.ok(requests.every(url => !url.includes('/submission')));
+  } finally { capture.dispose(); globalThis.fetch = original; }
+});
+
 test('streams before submission and closes with only one request containing the final events', async () => {
   const original = globalThis.fetch;
   const requests = [];

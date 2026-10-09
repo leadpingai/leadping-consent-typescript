@@ -10,6 +10,8 @@ export interface ConsentForm {
 
 /** Obtain from your backend. Never put a Leadping source API key in the browser. */
 export interface CaptureSession {
+  /** The service accepts large events split into bounded, ordered fragments. */
+  supportsEventFragments?: boolean;
   /** The service accepts a small final recording batch with submission. */
   supportsFinalBatch?: boolean;
   sessionId: string;
@@ -49,6 +51,9 @@ export interface CaptureOptions {
 }
 
 export interface SealedBatch {
+  /** Retained queue memory; fragment bodies are encoded only while uploading. */
+  retainedBytes: number;
+  fragmented?: boolean;
   number: number;
   firstEventNumber: number;
   lastEventNumber: number;

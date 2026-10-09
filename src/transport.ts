@@ -18,6 +18,7 @@ export class CaptureTransport {
       headers['Content-Encoding'] = 'gzip';
     }
     for (let attempt = 0; attempt < 5; attempt++) {
+      let retryDelay = Math.min(8000, 500 * 2 ** attempt) + Math.random() * 250;
       try {
         const response = await fetch(this.baseUrl + path, {
           method: 'PUT', headers, body, credentials: 'omit', redirect: 'error',
@@ -27,11 +28,17 @@ export class CaptureTransport {
         if (response.status === 410) throw new ReplayLimitExceededError();
         if (response.status < 500 && response.status !== 408 && response.status !== 429)
           throw new CaptureRejectedError(`Capture rejected (${response.status}).`);
+        const retryAfter = response.headers.get('Retry-After');
+        if (retryAfter) {
+          const milliseconds = /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+          if (Number.isFinite(milliseconds))
+            retryDelay = Math.max(retryDelay, Math.min(120000, milliseconds));
+        }
       } catch (error) {
         if (error instanceof CaptureRejectedError || error instanceof ReplayLimitExceededError || this.abort.signal.aborted) throw error;
       }
       if (attempt === 4) break;
-      await this.delay(Math.min(8000, 500 * 2 ** attempt) + Math.random() * 250);
+      await this.delay(retryDelay);
     }
     throw new Error('Capture upload could not be acknowledged.');
   }

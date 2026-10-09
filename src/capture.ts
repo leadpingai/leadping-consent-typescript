@@ -110,7 +110,14 @@ export class ConsentCapture {
     if (this.failure) throw this.failure;
   }
 
-  dispose(): void { this.disposed = true; this.stop(); this.transport?.dispose(); }
+  dispose(): void {
+    this.disposed = true;
+    this.stop();
+    this.transport?.dispose();
+    this.pending.length = 0;
+    this.queuedBytes = 0;
+    this.buffer.clear();
+  }
 
   private async finishCore(recipient: Recipient): Promise<CaptureReference> {
     if (this.stopped || this.failure) throw this.failure ?? new Error('Recorder is stopped.');
@@ -143,19 +150,27 @@ export class ConsentCapture {
     try {
       const serialized = JSON.stringify(event);
       if (!this.buffer.canAppend(serialized)) this.seal();
-      this.buffer.append(serialized);
+      if (!this.buffer.canAppend(serialized)) {
+        for (const batch of this.buffer.fragment(serialized, event.type, event.timestamp)) this.enqueue(batch);
+        this.backgroundFlush();
+      } else this.buffer.append(serialized);
       if (this.buffer.byteLength >= 64 * 1024) this.backgroundFlush();
-    } catch { this.fail(new Error('Recording exceeded its memory or event size limit.')); }
+    } catch (error) { this.fail(error instanceof Error ? error : new Error('Recording could not be buffered.')); }
   };
 
   private seal(): void {
     const batch = this.buffer.seal();
     if (!batch) return;
-    // UTF-16 string budget including queued/retrying batches. Up to three compressed copies are additional.
-    if (this.queuedBytes + batch.body.length * 2 > 2 * 1024 * 1024)
-      throw new Error('Recording upload backlog exceeded 2 MiB.');
+    this.enqueue(batch);
+  }
+
+  private enqueue(batch: SealedBatch): void {
+    // Large snapshots retain binary slices, not a base64/JSON copy per queued request.
+    // A slow/offline connection must fail explicitly instead of exhausting browser memory.
+    if (this.queuedBytes + batch.retainedBytes > 128 * 1024 * 1024)
+      throw new Error('Recording upload backlog exceeded 128 MiB. Check your connection.');
     this.pending.push(batch);
-    this.queuedBytes += batch.body.length * 2;
+    this.queuedBytes += batch.retainedBytes;
   }
 
   private async send(): Promise<void> {
@@ -168,8 +183,10 @@ export class ConsentCapture {
         while (!this.failure && !this.disposed && this.head < this.pending.length) {
           const index = this.head++;
           const batch = this.pending[index]!;
+          if (batch.fragmented && !this.session?.supportsEventFragments)
+            throw new Error('The consent service must be updated to support large page recordings.');
           await this.transport!.put('/batches/' + batch.number, batch.body);
-          this.queuedBytes -= batch.body.length * 2;
+          this.queuedBytes -= batch.retainedBytes;
           this.pending[index] = undefined;
         }
       }));
@@ -194,6 +211,10 @@ export class ConsentCapture {
     if (this.failure) return;
     this.failure = error;
     this.stop();
+    this.pending.length = 0;
+    this.queuedBytes = 0;
+    this.buffer.clear();
+    this.transport?.dispose();
     this.options.onError?.(error);
   }
 
